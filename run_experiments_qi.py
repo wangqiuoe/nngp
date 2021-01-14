@@ -70,7 +70,7 @@ flags.DEFINE_string('hparams', '',
                     'override the default setting.')
 
 #add by qi
-flags.DEFINE_string('data_path','/Users/wangqi/Library/Mobile Documents/com~apple~CloudDocs/Lehigh/Research/gp_pre/project/code/Folds5x2_pp.xlsx', 'datapath')
+flags.DEFINE_string('data_path','./Folds5x2_pp.xlsx', 'datapath')
 flags.DEFINE_float('train_test_split', '0.5', 'train_test_split_ratio')
 #add by qi
 
