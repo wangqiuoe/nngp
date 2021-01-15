@@ -12,17 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-r"""Run experiments with NNGP Kernel.
-
-Usage:
-
-python run_experiments.py \
-      --num_train=100 \
-      --num_eval=1000 \
-      --hparams='nonlinearity=relu,depth=10,weight_var=1.79,bias_var=0.83' \
-      --n_gauss=501 --n_var=501 --n_corr=500 --max_gauss=10
-
-"""
 
 from __future__ import absolute_import
 from __future__ import division
@@ -71,39 +60,19 @@ flags.DEFINE_string('hparams', '',
 
 #add by qi
 flags.DEFINE_string('data_path','./Folds5x2_pp.xlsx', 'datapath')
-flags.DEFINE_float('train_test_split', '0.5', 'train_test_split_ratio')
+flags.DEFINE_float('train_test_split', 0.5, 'train_test_split_ratio')
 #add by qi
 
 flags.DEFINE_string('experiment_dir', './tmp/nngp',
                     'Directory to put the experiment results.')
-flags.DEFINE_string('grid_path', './grid_data',
-                    'Directory to put or find the training data.')
-#flags.DEFINE_integer('num_train', 1000, 'Number of training data.')
-#flags.DEFINE_integer('num_eval', 1000,
-#                     'Number of evaluation data. Use 10_000 for full eval')
 flags.DEFINE_integer('seed', 1234, 'Random number seed for data shuffling')
-flags.DEFINE_boolean('save_kernel', False, 'Save Kernel do disk')
 flags.DEFINE_string('dataset', 'qi',
                     'Which dataset to use ["mnist","qi"]')
-flags.DEFINE_boolean('use_fixed_point_norm', False,
-                     'Normalize input variance to fixed point variance')
-
-flags.DEFINE_integer('n_gauss', 501,
-                     'Number of gaussian integration grid. Choose odd integer.')
-flags.DEFINE_integer('n_var', 501,
-                     'Number of variance grid points.')
-flags.DEFINE_integer('n_corr', 500,
-                     'Number of correlation grid points.')
-flags.DEFINE_integer('max_var', 100,
-                     'Max value for variance grid.')
-flags.DEFINE_integer('max_gauss', 10,
-                     'Range for gaussian integration.')
-
-
-def set_default_hparams():
-  return tf.contrib.training.HParams(
-      nonlinearity='relu', weight_var=1.3, bias_var=0.2, depth=10)
-
+flags.DEFINE_float('noise_var', 1e-4,
+                    'noise_var add to variance of train kernal matrix')
+flags.DEFINE_string('nonlinearity', 'relu',
+        'activation function: ["relu", "tanh"]')
+flags.DEFINE_integer('depth', 2, 'number of depths of NN')
 
 
 def normalize_y(train):
@@ -112,20 +81,7 @@ def normalize_y(train):
     train = (train-mu)/std
     return train,mu,std
 
-def gen_random_train_test(df,i):
-    x = df[['AT','V','AP','RH']].to_numpy()
-    y = df[['PE']].to_numpy()
-    x, y = shuffle(x, y, random_state=i)
-    len_train = int(x.shape[0]*FLAGS.train_test_split)
-    train_x = x[:len_train,:]
-    train_y = y[:len_train,:]
-    test_x = x[len_train:,:]
-    test_y = y[len_train:,:]
-    train_y,mu_y,std_y = normalize_y(train_y)
-    return train_x, train_y, test_x, test_y, test_x, test_y,mu_y,std_y
-
 def load_data():
-    # valid = test
     df = pd.read_excel(FLAGS.data_path)
     x = df[['AT','V','AP','RH']].to_numpy()
     y = df[['PE']].to_numpy()
@@ -138,10 +94,10 @@ def load_data():
     train_y_normal,mu_y,std_y = normalize_y(train_y)
     return train_x, train_y, test_x, test_y,mu_y,std_y, train_y_normal
 
-def do_eval_qi(sess, model, x_data, y_data, y_mu,y_std, save_pred=False):
+def do_eval_qi(model, x_data, y_data, y_mu,y_std, save_pred=False):
   """Run evaluation."""
 
-  gp_prediction, stability_eps = model.predict(x_data, sess)
+  gp_prediction = model.predict(x_data)
   y_pred = gp_prediction* y_std + y_mu
   rmse = np.sqrt(np.mean((y_data - y_pred)**2))
   tf.logging.info('RMSE: %.8f'%rmse)
@@ -154,15 +110,8 @@ def do_eval_qi(sess, model, x_data, y_data, y_mu,y_std, save_pred=False):
 
   return rmse
 
-def run_nngp_eval(hparams, run_dir):
+def run_nngp_eval(run_dir):
   """Runs experiments."""
-
-  tf.gfile.MakeDirs(run_dir)
-  # Write hparams to experiment directory.
-  with tf.gfile.GFile(run_dir + '/hparams', mode='w') as f:
-    f.write(hparams.to_proto().SerializeToString())
-
-  tf.logging.info('Starting job.')
   tf.logging.info('Hyperparameters')
   tf.logging.info('---------------------')
   tf.logging.info(hparams)
@@ -171,13 +120,7 @@ def run_nngp_eval(hparams, run_dir):
 
   # Get the sets of images and labels for training, validation, and
   # # test on dataset.
-  if FLAGS.dataset == 'mnist':
-    (train_image, train_label, valid_image, valid_label, test_image,
-     test_label) = load_dataset.load_mnist(
-         num_train=FLAGS.num_train,
-         mean_subtraction=True,
-         random_roated_labels=False)
-  elif FLAGS.dataset == 'qi':
+  if FLAGS.dataset == 'qi':
     train_image, train_label, test_image,test_label,y_mu,y_std,train_label_normal = load_data()
   else:
     raise NotImplementedError
@@ -190,87 +133,26 @@ def run_nngp_eval(hparams, run_dir):
 
   tf.logging.info('Building Model')
 
-  if hparams.nonlinearity == 'tanh':
-    nonlin_fn = tf.tanh
-  elif hparams.nonlinearity == 'relu':
-    nonlin_fn = tf.nn.relu
-  else:
-    raise NotImplementedError
+  model = nt.NNGPRegression(train_image, train_label_normal, noise_var = FLAGS.noise_var,nonlinearity=FLAGS.nonlinearity ,n_depth = FLAGS.depth)
 
-  with tf.Session() as sess:
-    # Construct NNGP kernel
-    nngp_kernel = nngp.NNGPKernel(
-        depth=hparams.depth,
-        weight_var=hparams.weight_var,
-        bias_var=hparams.bias_var,
-        nonlin_fn=nonlin_fn,
-        grid_path=FLAGS.grid_path,
-        n_gauss=FLAGS.n_gauss,
-        n_var=FLAGS.n_var,
-        n_corr=FLAGS.n_corr,
-        max_gauss=FLAGS.max_gauss,
-        max_var=FLAGS.max_var,
-        use_fixed_point_norm=FLAGS.use_fixed_point_norm)
+  start_time = time.time()
+  tf.logging.info('Evaluating Train set')
+  rmse_train = do_eval_qi(model, train_image,train_label, y_mu,y_std)
+  tf.logging.info('Evaluation of training set (%d examples) took '
+                    '%.3f secs'%(
+                        (train_image.shape[0]),
+                        time.time() - start_time))
 
-    # Construct Gaussian Process Regression model
-    model = gpr.GaussianProcessRegression(
-        train_image, train_label_normal, kern=nngp_kernel)
-
-    if True:
-        start_time = time.time()
-        tf.logging.info('Training')
-        rmse_train = do_eval_qi(sess, model, train_image,train_label, y_mu,y_std)
-        tf.logging.info('Evaluation of training set (%d examples) took '
-                          '%.3f secs'%(
-                              (train_image.shape[0]),
-                              time.time() - start_time))
-    
-    start_time = time.time()
-    tf.logging.info('Test')
-    rmse_test = do_eval_qi(
-        sess,
-        model,
-        test_image,
-        test_label,
-        y_mu,y_std,
-        save_pred=False)
-    tf.logging.info('Evaluation of test set (%d examples) took %.3f secs'%(
-        test_image.shape[0], time.time() - start_time))
-
-    ## For large number of training points, we do not evaluate on full set to
-    ## save on training evaluation time.
-    #if FLAGS.num_train <= 5000:
-    #  acc_train, mse_train, norm_train, final_eps = do_eval(
-    #      sess, model, train_image[:FLAGS.num_eval],
-    #      train_label[:FLAGS.num_eval])
-    #  tf.logging.info('Evaluation of training set (%d examples) took '
-    #                  '%.3f secs'%(
-    #                      min(FLAGS.num_train, FLAGS.num_eval),
-    #                      time.time() - start_time))
-    #else:
-    #  acc_train, mse_train, norm_train, final_eps = do_eval(
-    #      sess, model, train_image[:1000], train_label[:1000])
-    #  tf.logging.info('Evaluation of training set (%d examples) took '
-    #                  '%.3f secs'%(1000, time.time() - start_time))
-
-    #start_time = time.time()
-    #tf.logging.info('Validation')
-    #acc_valid, mse_valid, norm_valid, _ = do_eval(
-    #    sess, model, valid_image[:FLAGS.num_eval],
-    #    valid_label[:FLAGS.num_eval])
-    #tf.logging.info('Evaluation of valid set (%d examples) took %.3f secs'%(
-    #    FLAGS.num_eval, time.time() - start_time))
-
-    #start_time = time.time()
-    #tf.logging.info('Test')
-    #acc_test, mse_test, norm_test, _ = do_eval(
-    #    sess,
-    #    model,
-    #    test_image[:FLAGS.num_eval],
-    #    test_label[:FLAGS.num_eval],
-    #    save_pred=False)
-    #tf.logging.info('Evaluation of test set (%d examples) took %.3f secs'%(
-    #    FLAGS.num_eval, time.time() - start_time))
+  start_time = time.time()
+  tf.logging.info('Evaluating test set')
+  rmse_test = do_eval_qi(
+      model,
+      test_image,
+      test_label,
+      y_mu,y_std,
+      save_pred=False)
+  tf.logging.info('Evaluation of test set (%d examples) took %.3f secs'%(
+      test_image.shape[0], time.time() - start_time))
 
   metrics = {
       'train_rmse': float(rmse_train),
@@ -278,14 +160,8 @@ def run_nngp_eval(hparams, run_dir):
   }
 
   record_results = [
-	["FLAGS.train_test_split", "hparams.nonlinearity", "hparams.weight_var","hparams.bias_var", "hparams.depth", "rmse_train", "rmse_test"],
-      	[FLAGS.train_test_split, hparams.nonlinearity, hparams.weight_var,hparams.bias_var, hparams.depth, rmse_train, rmse_test],
-]
-  if nngp_kernel.use_fixed_point_norm:
-    metrics['var_fixed_point'] = float(nngp_kernel.var_fixed_point_np[0])
-    record_results[0].append("nngp_kernel.var_fixed_point_np")
-    record_results[1].append(nngp_kernel.var_fixed_point_np[0])
-
+      	FLAGS.train_test_split, FLAGS.nonlinearity, FLAGS.depth, FLAGS.noise_var, rmse_train, rmse_test,
+        ]
   # Store data
   result_file = os.path.join(run_dir, 'results.csv')
   with tf.gfile.Open(result_file, 'a') as f:
@@ -296,13 +172,9 @@ def run_nngp_eval(hparams, run_dir):
 
 
 def main(argv):
-  del argv  # Unused
-  hparams = set_default_hparams().parse(FLAGS.hparams)
-  run_nngp_eval(hparams, FLAGS.experiment_dir)
+  run_nngp_eval(FLAGS.experiment_dir)
 
 
 if __name__ == '__main__':
   tf.app.run(main)
-  #hparams = set_default_hparams().parse(FLAGS.hparams)
-  #train_image, train_label, valid_image, valid_label, test_image,test_label, mu, std = run_nngp_eval(hparams, FLAGS.experiment_dir)
 
