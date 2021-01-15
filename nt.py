@@ -8,7 +8,7 @@ from neural_tangents import stax
 
 
 class NNGPRegression(object):
-    def __init__(self, input_x, output_y, noise_var=1e-4, nonlinearity='relu'):
+    def __init__(self, input_x, output_y, noise_var=1e-4, nonlinearity='relu', n_depth =2):
         self.input_x = input_x
         self.output_y = output_y
         self.noise_var = noise_var
