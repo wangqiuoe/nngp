@@ -27,7 +27,7 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 
-import gpr
+import nt
 import load_dataset
 import nngp
 
@@ -60,7 +60,7 @@ flags.DEFINE_string('hparams', '',
 
 #add by qi
 flags.DEFINE_string('data_path','./Folds5x2_pp.xlsx', 'datapath')
-flags.DEFINE_float('train_test_split', 0.5, 'train_test_split_ratio')
+flags.DEFINE_float('train_test_split', 0.8, 'train_test_split_ratio')
 #add by qi
 
 flags.DEFINE_string('experiment_dir', './tmp/nngp',
@@ -68,9 +68,9 @@ flags.DEFINE_string('experiment_dir', './tmp/nngp',
 flags.DEFINE_integer('seed', 1234, 'Random number seed for data shuffling')
 flags.DEFINE_string('dataset', 'qi',
                     'Which dataset to use ["mnist","qi"]')
-flags.DEFINE_float('noise_var', 1e-4,
+flags.DEFINE_float('noise_var', 0.1,
                     'noise_var add to variance of train kernal matrix')
-flags.DEFINE_string('nonlinearity', 'relu',
+flags.DEFINE_string('nonlinearity', 'tanh',
         'activation function: ["relu", "tanh"]')
 flags.DEFINE_integer('depth', 2, 'number of depths of NN')
 
@@ -98,6 +98,7 @@ def do_eval_qi(model, x_data, y_data, y_mu,y_std, save_pred=False):
   """Run evaluation."""
 
   gp_prediction = model.predict(x_data)
+  print(gp_prediction[:10])
   y_pred = gp_prediction* y_std + y_mu
   rmse = np.sqrt(np.mean((y_data - y_pred)**2))
   tf.logging.info('RMSE: %.8f'%rmse)
@@ -113,8 +114,6 @@ def do_eval_qi(model, x_data, y_data, y_mu,y_std, save_pred=False):
 def run_nngp_eval(run_dir):
   """Runs experiments."""
   tf.logging.info('Hyperparameters')
-  tf.logging.info('---------------------')
-  tf.logging.info(hparams)
   tf.logging.info('---------------------')
   tf.logging.info('Loading data')
 

@@ -25,3 +25,4 @@ y_test_ntk = predict_fn(x_test=x_test, get='ntk')
 # (20, 1) np.ndarray test predictions of an infinite continuous
 # gradient descent trained network at convergence (t = inf)
 
+print(y_test_nngp, y_test_ntk)
